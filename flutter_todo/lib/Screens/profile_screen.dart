@@ -21,8 +21,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _emailController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _genderController = TextEditingController();
   bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -33,29 +33,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void loadUserData() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? userJson = prefs.getString('user');
-    Map<String, dynamic> userMap = userJson != null ? jsonDecode(userJson) : {};
-    setState(() {
-      user = User(
-        id: userMap['id'] ?? 0,
-        firstname: userMap['firstname'] ?? '',
-        lastname: userMap['lastname'] ?? '',
-        email: userMap['email'] ?? '',
-        username: userMap['username'] ?? '',
-        password: userMap['password'] ?? '',
-        gender: userMap['gender'] ?? '',
-        created_date: userMap['created_date'] ?? '',
-      );
-      _firstnameController.text = user.firstname;
-      _lastnameController.text = user.lastname;
-      _emailController.text = user.email;
-      _usernameController.text = user.username;
-      _passwordController.text = user.password;
-      _genderController.text = user.gender; // Initially set to avoid error
-    });
+    if (userJson != null) {
+      Map<String, dynamic> userMap = jsonDecode(userJson);
+      setState(() {
+        user = User(
+          id: userMap['id'] ?? 0,
+          firstname: userMap['firstname'] ?? '',
+          lastname: userMap['lastname'] ?? '',
+          email: userMap['email'] ?? '',
+          username: userMap['username'] ?? '',
+          password: userMap['password'] ?? '',
+          gender: userMap['gender'] ?? '',
+          created_date: userMap['created_date'] ?? '',
+        );
+        _firstnameController.text = user.firstname;
+        _lastnameController.text = user.lastname;
+        _emailController.text = user.email;
+        _usernameController.text = user.username;
+        _passwordController.text = user.password;
+      });
+    }
   }
 
   void updateProfile(BuildContext context) async {
     if (_formKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
+
       User updatedUser = User(
         id: user.id,
         firstname: _firstnameController.text,
@@ -63,7 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         email: _emailController.text,
         username: _usernameController.text,
         password: _passwordController.text,
-        gender: user.gender, // Keep gender unchanged
+        gender: user.gender,
         created_date: user.created_date,
       );
 
@@ -71,168 +74,361 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .updateUser(updatedUser);
 
       if (isUpdated) {
+        await saveUserToPrefs(updatedUser);
         loadUserData();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully')),
+          SnackBar(
+            content: Text('Profile updated successfully'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update profile')),
+          SnackBar(
+            content: Text('Failed to update profile'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> saveUserToPrefs(User user) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user', jsonEncode(user.toJson()));
+  }
+
+  void deleteProfile() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 12),
+            Text('Delete Account'),
+          ],
+        ),
+        content: Text('This will permanently delete your account and all data. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      bool isDeleted = await Provider.of<UsersData>(context, listen: false)
+          .deleteUser(user);
+
+      if (isDeleted) {
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Account deleted successfully'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete account'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
   }
 
-  void deleteProfile() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    bool isDeleted = await Provider.of<UsersData>(context, listen: false)
-        .deleteUser(user);
-
-    if (isDeleted) {
-      await prefs.clear();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile deleted successfully')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to delete profile')),
-      );
-    }
-    Navigator.pop(context); // Navigate back to the home screen
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Profile'),
-        centerTitle: true,
-        backgroundColor: Colors.greenAccent,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              Text(
-                'Account Created: ${user.formattedCreatedDate}',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-              TextFormField(
-                controller: _firstnameController,
-                decoration: const InputDecoration(labelText: 'First Name'),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your first name';
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: _lastnameController,
-                decoration: const InputDecoration(labelText: 'Last Name'),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your last name';
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: _emailController,
-                decoration: const InputDecoration(labelText: 'Email'),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your email';
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: _usernameController,
-                decoration: const InputDecoration(labelText: 'Username'),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your username';
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: _passwordController,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                ),
-                obscureText: _obscurePassword,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your password';
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: _genderController,
-                decoration: const InputDecoration(labelText: 'Gender'),
-                readOnly: true, // Make gender field unchangeable
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => updateProfile(context),
-                child: const Text('Update Profile'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () async {
-                  bool? confirmDeleteProfile = await showDialog<bool>(
-                    context: context,
-                    builder: (BuildContext context) {
-                      return AlertDialog(
-                        title: const Text('Delete Profile'),
-                        content: const Text('Are you sure you want to delete your profile? This action cannot be undone.'),
-                        actions: [
-                          TextButton(
-                            child: const Text('Cancel'),
-                            onPressed: () {
-                              Navigator.of(context).pop(false);
-                            },
-                          ),
-                          TextButton(
-                            child: const Text('Delete'),
-                            onPressed: () {
-                              Navigator.of(context).pop(true);
-                            },
-                          ),
-                        ],
-                      );
-                    },
-                  );
-
-                  if (confirmDeleteProfile == true) {
-                    deleteProfile(); // Call the delete function
-                  }
-                },
-                child: const Text('Delete Profile'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-              )
-            ],
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.blueAccent),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'My Profile',
+          style: TextStyle(
+            color: Colors.black87,
+            fontWeight: FontWeight.w600,
           ),
         ),
+      ),
+      body: user == null
+          ? Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Profile Header
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 40,
+                    backgroundColor: Colors.blueAccent.withOpacity(0.2),
+                    child: Icon(
+                      Icons.person,
+                      size: 40,
+                      color: Colors.blueAccent,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    '@${user.username}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Member since ${user.formattedCreatedDate}',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 24),
+
+            // Account Information
+            Text(
+              'Account Information',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            SizedBox(height: 16),
+
+            Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  // Name Row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildTextField(
+                          controller: _firstnameController,
+                          label: 'First Name',
+                          prefixIcon: Icons.person_outline,
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: _buildTextField(
+                          controller: _lastnameController,
+                          label: 'Last Name',
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 20),
+
+                  // Email
+                  _buildTextField(
+                    controller: _emailController,
+                    label: 'Email Address',
+                    prefixIcon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  SizedBox(height: 20),
+
+                  // Username
+                  _buildTextField(
+                    controller: _usernameController,
+                    label: 'Username',
+                    prefixIcon: Icons.alternate_email_outlined,
+                  ),
+                  SizedBox(height: 20),
+
+                  // Password
+                  TextFormField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: Icon(Icons.lock_outline, color: Colors.grey[600]),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: Colors.grey[600],
+                        ),
+                        onPressed: () {
+                          setState(() => _obscurePassword = !_obscurePassword);
+                        },
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      filled: true,
+                      fillColor: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 20),
+
+                  // Gender (Read-only)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                    child: Row(
+                      children: [
+                        Icon(Icons.person, color: Colors.grey[600]),
+                        SizedBox(width: 12),
+                        Text(
+                          'Gender',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                        Spacer(),
+                        Text(
+                          user.gender,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 32),
+
+            // Update Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : () => updateProfile(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                child: _isLoading
+                    ? SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+                    : Text(
+                  'Save Changes',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+
+            // Delete Account
+            SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: deleteProfile,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  side: BorderSide(color: Colors.red),
+                ),
+                child: Text(
+                  'Delete Account',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.red,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    IconData? prefixIcon,
+    TextInputType? keyboardType,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: prefixIcon != null
+            ? Icon(prefixIcon, color: Colors.grey[600])
+            : null,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        filled: true,
+        fillColor: Colors.white,
       ),
     );
   }
